@@ -1,0 +1,21 @@
+{
+  "name": "node-vagrant-test-task",
+  "version": "0.0.1",
+  "description": "Some vagrant automation tool",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Maxim Nesterenko <alendorff@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "koa": "^2.2.0",
+    "koa-json-body": "^5.3.0",
+    "koa-logger": "^3.0.0",
+    "koa-router": "^7.0.0",
+    "debug": "^2.6.7"
+  },
+  "engines": {
+    "node": "^7.8.0"
+  }
+}
