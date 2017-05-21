@@ -2,8 +2,8 @@ const Router    = require('koa-router'),
       jsonBody  = require('koa-json-body')({limit: '100kb'}),
       debug     = require('debug')('node-vagrant-test-task:router'),
       {Types}   = require('mongoose'),
-      taskQueue = require('./taskQueue/taskQueue'),
-      Result    = require('./models/result');
+      taskQueue = require('./taskQueue'),
+      Result    = require('./models/Result');
 
 const router = new Router();
 
@@ -16,11 +16,9 @@ async function saveResult(ctx, next) {
   };
 
   if (typeof ctx.isError !== 'undefined') doc.isError = ctx.isError;
-  const res = new Result(doc);
 
-  res.save();
-  //noinspection JSIgnoredPromiseFromCall
-  taskQueue.remove(ctx.request.body.module);
+  const res = new Result(doc);
+  res.save().then(() => taskQueue.finish(ctx.request.body.module));
 }
 
 router.post('/saveReport', jsonBody, saveResult);

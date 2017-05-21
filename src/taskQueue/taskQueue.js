@@ -1,8 +1,13 @@
 'use strict';
 
-const redis   = require('redis'),
-      config  = require('../../config.json'),
-      vagrant = require('../vagrant/vagrant');
+const redis         = require('redis'),
+      debug         = require('debug')('node-vagrant-test-task:taskQueue'),
+      config        = require('../../config.json'),
+      vagrant       = require('../vagrant'),
+      redisClient   = require('../redisClient'),
+      Task          = require('../models/Task'),
+      taskSet       = 'tasks',
+      activeTaskSet = 'activeTasks';
 
 /**
  * It's more like controller over Redis, queue itself stored in Redis.
@@ -12,53 +17,94 @@ class TaskQueue {
     this.r = redis;
   }
 
-  async getNextTask() {
-    // <REDIS REQUEST TO ORDERED SET tasks HERE>
-    return this.r;
-  }
-
-  async getActiveTasks() {
-    // <REDIS REQUEST TO ORDERED SET tasks HERE>
-    return this.r;
-  }
-
+  /**
+   * @returns {Promise.<number>}
+   */
   async getQueueSize() {
-      // <SOME REDIS REQUEST HERE>
+    return this.r.zcardAsync(taskSet);
   }
 
+  /**
+   * Retrieves the first element in the queue and remove it from
+   * @returns {Promise.<string>}
+   */
+  async getNextTaskId() {
+    return this.r.zrangeAsync(taskSet, 0, 0).then((r) => r[0] ? r[0] : null);
+  }
+
+  /**
+   * Add task into queue or handle it immediately if possible
+   * @param {Object} task
+   * @returns {Promise.<void>}
+   */
   async add(task) {
     const queueSize = await this.getQueueSize();
+    debug('add called > current queue size = %d', queueSize);
 
-    // if possible - handle immediately
-    if (!queueSize && vagrant.canCreateInstance) {
-      handle(task);
+    const currentRank = await this.r.zrankAsync(activeTaskSet, task.id);
+    if (currentRank !== null) {
+      debug('already handled=%j ', task);
     } else {
-      // otherwise add it to redis "tasks" collection
+      debug('adding task to "tasks" collection. Task=%j', task);
+      // NX means we won't update SCORES for existing records
+      await this.r.zaddAsync(taskSet, 'NX', Date.now(), task.id);
+      if (vagrant.canCreateInstance) {
+        debug('will be handled right now: task=%j ', task);
+        await this.handle(task);
+      }
     }
-  }
+}
 
-  async handleNextTask() {
-    await this.handle(await this.getNextTask());
-  }
-
+  /**
+   * Move task from "tasks" collection to "activeTasks" collection and run vagrant instance for it
+   * @param {string|object} task
+   * @returns {Promise.<void>}
+   */
   async handle(task) {
-    if (!task || !vagrant.canCreateInstance) return false;
+    debug('handle called, vagrant.canCreateInstance=%s; handle task=%j', vagrant.canCreateInstance ? "true" : "false", task);
 
-    // move task from "tasks" collection to "activeTasks" collection. Structure is the same.
+    if (!vagrant.canCreateInstance) {
+      debug('can not handle task right now. Task=%j', task);
+      return Promise.resolve(null);
+    }
 
-    // store taskId in redis (task:id = keys) and ZADD currentTasks Date.now() task.id
+    if (!task) throw new Error(`WTF with task ${task}`);
 
-    // run vagrant instance
+    let taskId, taskObj;
+    if (typeof task === 'string') {
+      taskId = task;
+      taskObj = await Task.findById(taskId);
+    } else {
+      taskId = task.id;
+      taskObj = task;
+    }
+
+    await Promise.all([
+      this.r.zaddAsync(activeTaskSet, Date.now(), taskId),
+      this.r.zremAsync(taskSet, taskId),
+      vagrant.runInstance(taskObj)
+    ])
+      .then(r => debug('handle result=%j', (r)))
+      .catch(e => console.error(e));
   }
 
-  async remove(taskId) {
-    // stop the vagrant associated with taskId
-    await vagrant.terminateInstance(taskId);
-    // remove taskId from redis activeTasks
-    // await <REDIS REQUEST HERE>
+  /**
+   * Removes task from active queue, its associated vagrant instance should be terminated
+   * and next task from waiting queue should start to be handled.
+   * @param taskId
+   * @returns {Promise.<void>}
+   */
+  async finish(taskId) {
+    debug('finish called with taskId=%j', taskId);
+    await Promise.all([
+      this.r.zremAsync(activeTaskSet, taskId),
+      vagrant.terminateInstance(taskId)
+    ]);
 
-    this.handleNextTask();
+    const next = await this.getNextTaskId();
+    debug('next task id=%j', next);
+    if (next) return this.handle(next);
   }
 }
 
-module.exports = new TaskQueue(redis.createClient());
+module.exports = new TaskQueue(redisClient);

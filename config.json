@@ -1,18 +1,19 @@
 {
   "port": 8080,
   "mongodb": {
-    "url": "",
+    "url": "mongodb://localhost:27017/VAGRANT",
     "taskCollection": "Task",
+    "taskCollectionFilter": {},
     "resultCollection": "Result",
-    "timeoutCollection": "Timeouted"
+    "timeoutCollection": "Timeouted",
+    "taskWatcherInterval": 3000
   },
   "redis": {
-
+    "url": "redis://localhost:6379"
   },
   "vagrant": {
     "maxInstances": 2,
     "timeout": 60000,
     "terminateInterval": 2000
-  },
-  "taskWatcherInterval": 3000
+  }
 }
