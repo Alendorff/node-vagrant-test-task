@@ -24,6 +24,12 @@ class TaskQueue {
     return this.r.zcardAsync(waitingQueue);
   }
 
+  async getActiveQueue(withScores = false) {
+    return (withScores) ?
+      this.r.zrangeAsync(activeQueue, 0, -1, 'WITHSCORES') :
+      this.r.zrangeAsync(activeQueue, 0, -1);
+  }
+
   /**
    * Retrieves the first element in the queue and remove it from
    * @returns {Promise.<string>}
