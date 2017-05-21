@@ -1,13 +1,13 @@
 'use strict';
 
-const redis         = require('redis'),
-      debug         = require('debug')('node-vagrant-test-task:taskQueue'),
-      config        = require('../../config.json'),
-      vagrant       = require('../vagrant'),
-      redisClient   = require('../redisClient'),
-      Task          = require('../models/Task'),
-      taskSet       = 'tasks',
-      activeTaskSet = 'activeTasks';
+const redis       = require('redis'),
+      debug       = require('debug')('node-vagrant-test-task:taskQueue'),
+      vagrant     = require('../vagrant'),
+      redisClient = require('../redisClient')(),
+      Task        = require('../models/Task'),
+      config      = require('../../config.json').queue;
+
+const {waitingQueue, activeQueue} = config;
 
 /**
  * It's more like controller over Redis, queue itself stored in Redis.
@@ -21,7 +21,7 @@ class TaskQueue {
    * @returns {Promise.<number>}
    */
   async getQueueSize() {
-    return this.r.zcardAsync(taskSet);
+    return this.r.zcardAsync(waitingQueue);
   }
 
   /**
@@ -29,7 +29,7 @@ class TaskQueue {
    * @returns {Promise.<string>}
    */
   async getNextTaskId() {
-    return this.r.zrangeAsync(taskSet, 0, 0).then((r) => r[0] ? r[0] : null);
+    return this.r.zrangeAsync(waitingQueue, 0, 0).then((r) => r[0] ? r[0] : null);
   }
 
   /**
@@ -41,19 +41,19 @@ class TaskQueue {
     const queueSize = await this.getQueueSize();
     debug('add called > current queue size = %d', queueSize);
 
-    const currentRank = await this.r.zrankAsync(activeTaskSet, task.id);
+    const currentRank = await this.r.zrankAsync(activeQueue, task.id);
     if (currentRank !== null) {
       debug('already handled=%j ', task);
     } else {
       debug('adding task to "tasks" collection. Task=%j', task);
       // NX means we won't update SCORES for existing records
-      await this.r.zaddAsync(taskSet, 'NX', Date.now(), task.id);
+      await this.r.zaddAsync(waitingQueue, 'NX', Date.now(), task.id);
       if (vagrant.canCreateInstance) {
         debug('will be handled right now: task=%j ', task);
         await this.handle(task);
       }
     }
-}
+  }
 
   /**
    * Move task from "tasks" collection to "activeTasks" collection and run vagrant instance for it
@@ -80,8 +80,8 @@ class TaskQueue {
     }
 
     await Promise.all([
-      this.r.zaddAsync(activeTaskSet, Date.now(), taskId),
-      this.r.zremAsync(taskSet, taskId),
+      this.r.zaddAsync(activeQueue, Date.now(), taskId),
+      this.r.zremAsync(waitingQueue, taskId),
       vagrant.runInstance(taskObj)
     ])
       .then(r => debug('handle result=%j', (r)))
@@ -97,7 +97,7 @@ class TaskQueue {
   async finish(taskId) {
     debug('finish called with taskId=%j', taskId);
     await Promise.all([
-      this.r.zremAsync(activeTaskSet, taskId),
+      this.r.zremAsync(activeQueue, taskId),
       vagrant.terminateInstance(taskId)
     ]);
 

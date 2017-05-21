@@ -11,6 +11,10 @@
   "redis": {
     "url": "redis://localhost:6379"
   },
+  "queue": {
+    "activeQueue": "activeTasks",
+    "waitingQueue": "tasks"
+  },
   "vagrant": {
     "maxInstances": 2,
     "timeout": 60000,
